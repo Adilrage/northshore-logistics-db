@@ -95,6 +95,7 @@ def view_shipments():
         FROM Shipments s
         JOIN Customers c1 ON s.sender_id = c1.customer_id
         JOIN Customers c2 ON s.receiver_id = c2.customer_id
+        ORDER BY s.shipment_id
     """)
 
     rows = cursor.fetchall()
@@ -149,10 +150,14 @@ def add_incident_report(current_user):
         print("Access denied.")
         return
 
-    shipment_id = input("Enter shipment ID: ")
-    incident_type = input("Enter incident type, e.g. Delay, Damaged Goods, Failed Delivery: ")
-    description = input("Enter incident description: ")
-    resolution_status = input("Enter resolution status, e.g. Pending, Investigating, Resolved: ")
+    shipment_id = input("Enter shipment ID: ").strip()
+    incident_type = input("Enter incident type, e.g. Delay, Damaged Goods, Failed Delivery: ").strip()
+    description = input("Enter incident description: ").strip()
+    resolution_status = input("Enter resolution status, e.g. Pending, Investigating, Resolved: ").strip()
+
+    if not shipment_id or not incident_type or not description or not resolution_status:
+        print("All fields must be completed.")
+        return
 
     conn = connect_db()
     cursor = conn.cursor()
@@ -192,6 +197,7 @@ def view_available_vehicles():
         SELECT vehicle_id, registration_number, capacity, status
         FROM Vehicles
         WHERE status = 'Available'
+        ORDER BY vehicle_id
     """)
 
     rows = cursor.fetchall()
@@ -216,6 +222,7 @@ def view_active_drivers():
         SELECT driver_id, name, phone, license_number, status
         FROM Drivers
         WHERE status = 'Active'
+        ORDER BY driver_id
     """)
 
     rows = cursor.fetchall()
@@ -241,6 +248,7 @@ def check_low_inventory():
         FROM Inventory i
         JOIN Warehouses w ON i.warehouse_id = w.warehouse_id
         WHERE i.quantity <= i.reorder_level
+        ORDER BY w.name
     """)
 
     rows = cursor.fetchall()
@@ -264,8 +272,8 @@ def update_delivery_status(current_user):
         print("Access denied. Only admin and manager users update delivery status.")
         return
 
-    delivery_id = input("Enter delivery ID: ")
-    new_status = input("Enter new delivery status: ")
+    delivery_id = input("Enter delivery ID: ").strip()
+    new_status = input("Enter new delivery status: ").strip()
 
     allowed_statuses = ["In Transit", "Delivered", "Delayed", "Returned", "Failed"]
 
@@ -309,9 +317,13 @@ def assign_delivery_resources(current_user):
         print("Access denied. Only admin and manager users assign delivery resources.")
         return
 
-    delivery_id = input("Enter delivery ID: ")
-    driver_id = input("Enter driver ID: ")
-    vehicle_id = input("Enter vehicle ID: ")
+    delivery_id = input("Enter delivery ID: ").strip()
+    driver_id = input("Enter driver ID: ").strip()
+    vehicle_id = input("Enter vehicle ID: ").strip()
+
+    if not delivery_id or not driver_id or not vehicle_id:
+        print("Delivery ID, driver ID, and vehicle ID are required.")
+        return
 
     conn = connect_db()
     cursor = conn.cursor()
@@ -401,6 +413,89 @@ def view_delivery_progress():
     conn.close()
 
 
+def view_vehicle_utilisation():
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT v.vehicle_id, v.registration_number, v.status,
+               COUNT(d.delivery_id) AS assigned_deliveries
+        FROM Vehicles v
+        LEFT JOIN Deliveries d ON v.vehicle_id = d.vehicle_id
+        GROUP BY v.vehicle_id, v.registration_number, v.status
+        ORDER BY assigned_deliveries DESC
+    """)
+
+    rows = cursor.fetchall()
+
+    print("\nVehicle Utilisation Report")
+    print("-" * 80)
+
+    if not rows:
+        print("No vehicle records found.")
+    else:
+        for row in rows:
+            print(f"Vehicle ID: {row[0]} | Reg: {row[1]} | Status: {row[2]} | Assigned Deliveries: {row[3]}")
+
+    conn.close()
+
+
+def view_manager_dashboard(current_user):
+    allowed_roles = ["admin", "manager"]
+
+    if current_user["role"] not in allowed_roles:
+        print("Access denied. Only admin and manager users view the manager dashboard.")
+        return
+
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM Shipments")
+    total_shipments = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM Shipments WHERE status = 'Delivered'")
+    delivered_shipments = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM Shipments WHERE status = 'In Transit'")
+    in_transit_shipments = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM Shipments WHERE status = 'Delayed'")
+    delayed_shipments = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM Incidents")
+    total_incidents = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM Vehicles WHERE status = 'Available'")
+    available_vehicles = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM Vehicles WHERE status != 'Available'")
+    unavailable_vehicles = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM Drivers WHERE status = 'Active'")
+    active_drivers = cursor.fetchone()[0]
+
+    cursor.execute("SELECT SUM(cost) FROM Shipments")
+    total_cost = cursor.fetchone()[0]
+
+    if total_cost is None:
+        total_cost = 0
+
+    print("\nManager Dashboard")
+    print("-" * 70)
+    print(f"Total shipments: {total_shipments}")
+    print(f"Delivered shipments: {delivered_shipments}")
+    print(f"In transit shipments: {in_transit_shipments}")
+    print(f"Delayed shipments: {delayed_shipments}")
+    print(f"Total incident reports: {total_incidents}")
+    print(f"Available vehicles: {available_vehicles}")
+    print(f"Unavailable vehicles: {unavailable_vehicles}")
+    print(f"Active drivers: {active_drivers}")
+    print(f"Total shipment cost: £{total_cost}")
+    print("-" * 70)
+
+    conn.close()
+
+
 def view_audit_logs(current_user):
     if current_user["role"] != "admin":
         print("Access denied. Only admin users view audit logs.")
@@ -446,9 +541,11 @@ def main_menu(current_user):
         print("8. Assign driver and vehicle to delivery")
         print("9. Update delivery status")
         print("10. View audit logs")
-        print("11. Exit")
+        print("11. Manager dashboard")
+        print("12. Vehicle utilisation report")
+        print("13. Exit")
 
-        choice = input("Choose an option: ")
+        choice = input("Choose an option: ").strip()
 
         if choice == "1":
             view_shipments()
@@ -471,6 +568,10 @@ def main_menu(current_user):
         elif choice == "10":
             view_audit_logs(current_user)
         elif choice == "11":
+            view_manager_dashboard(current_user)
+        elif choice == "12":
+            view_vehicle_utilisation()
+        elif choice == "13":
             print("Goodbye.")
             break
         else:
